@@ -1,0 +1,110 @@
+#include <stdio.h>
+#include <tchar.h>
+#include <opencv.hpp>
+#include <highgui.hpp>
+#include <iostream>
+#include <fstream>
+#include <string>
+
+#include <opencv2/features2d.hpp>
+#include <opencv2/imgcodecs.hpp>
+
+using namespace std;
+using namespace cv;
+
+const float THRESHOLD = 10.0;
+const int draw_shift_bits = 4;
+const int draw_multiplier = 1 << draw_shift_bits;
+
+
+int _tmain(int argc, _TCHAR* argv[])
+{
+	cv::Mat descriptor1, descriptor2;
+	cv::Mat output;
+	size_t i, j, k;
+
+	auto img_tmp = cv::imread("template.jpg");
+	if (!img_tmp.data) {
+		cout << "cannot read tmp file" << endl;
+		return -1;
+	}
+
+	int calcx_size = img_tmp.size().width/10;
+	int calcy_size = img_tmp.size().height/10;
+
+	cv::Ptr<cv::AKAZE> detector = cv::AKAZE::create();
+	std::vector<cv::KeyPoint> keyPoints;
+	std::vector<cv::KeyPoint> keyPoints2;
+
+	std::vector<cv::DMatch> matches;
+	std::vector<std::vector<cv::DMatch>> matchr, crosmat, match, bufmat;
+	cv::Ptr<cv::DescriptorMatcher> matcher(new cv::BFMatcher(cv::NORM_HAMMING,true));
+	
+	int max_pt = 0, cnt = 0;
+	float max_pt_x = 0, max_pt_y = 0;
+	auto img = cv::imread("nogizaka.jpg");
+	while (!img.data) {
+		cout << "cannot read img file" << endl;
+		return -1;
+	}
+
+	detector->detect(img, keyPoints);
+	detector->detect(img_tmp, keyPoints2);
+	// 特徴記述
+	detector->compute(img, keyPoints, descriptor1);
+	detector->compute(img_tmp, keyPoints2, descriptor2);
+	matcher->radiusMatch(descriptor1, descriptor2, matchr, THRESHOLD);
+	cv::drawMatches(img, keyPoints, img_tmp, keyPoints2, matchr, output);
+
+	vector<Point2f> ptMat;
+	//features2d/src/draw.cpp
+	for (size_t m = 0; m < matchr.size(); m++){
+		for (size_t k = 0; k < matchr[m].size(); k++){
+			int i1 = matchr[m][k].queryIdx;
+			int i2 = matchr[m][k].trainIdx;
+			cv::Point2f pt1 = keyPoints[i1].pt,
+				pt2 = keyPoints[i2].pt,
+				dpt2 = cv::Point2f(std::min(pt2.x + img.size().width, float(img.size().width - 1)), pt2.y);
+				ptMat.push_back(pt1);
+		}
+	}
+		
+	//単純ソート
+	Point2f min, tmp;
+	for (i = 0; i < ptMat.size(); i++){
+		min = ptMat[i];
+		k = i;
+		for (j = i + 1; j < ptMat.size(); j++){
+			if (ptMat[j].x < min.x){
+				min = ptMat[j];
+				k = j;
+			}
+		}
+		tmp = ptMat[i];
+		ptMat[i] = ptMat[k];
+		ptMat[k] = tmp;
+	}
+
+	for (i = 0; i < ptMat.size(); i++){
+		cnt = 0;
+		for (j = 0; (i + j<ptMat.size()-1)&& (ptMat[i + j].x - ptMat[i].x<calcx_size) && (ptMat[i + j].y - ptMat[i].y<calcy_size); j++){
+			if ((ptMat[i+j+1].x - ptMat[i+j].x>0.1) || (ptMat[i+j+1].y - ptMat[i+j].y>0.1))
+				cnt++;
+		}
+		if (cnt >= max_pt){
+			max_pt = cnt;
+			max_pt_x = ptMat[i].x;
+			max_pt_y = ptMat[i].y;
+		}
+	}
+
+	cv::rectangle(output, cv::Point(max_pt_x-(img_tmp.size().width/2), max_pt_y-(img_tmp.size().height/2)), cv::Point(max_pt_x +(img_tmp.size().width/2), max_pt_y+(img_tmp.size().height/2)), CV_RGB(255, 0, 0), 3);
+	cv::imwrite("Akaze.bmp", output);
+
+	//ファイルに書き込み
+	std::ofstream ofs("MatchPoint.txt");
+	ofs << max_pt_x << endl;
+	ofs << max_pt_y << endl;
+
+	return 0;
+}
